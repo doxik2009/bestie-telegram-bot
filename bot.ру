@@ -1,0 +1,163 @@
+import os
+import random
+import string
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, ContextTypes
+)
+
+# =====================
+# НАСТРОЙКИ ИГРЫ
+# =====================
+
+QUESTIONS = [
+    {
+        "q": "Ты пишешь «ок» — это…",
+        "a": ["Нормально", "Пассивная агрессия", "Финал сезона «Дружба»"],
+    },
+    {
+        "q": "Если я опаздываю на 20 минут, ты…",
+        "a": ["Тоже опаздываю", "Молча злюсь", "Уже заказала еду и мем"],
+    },
+    {
+        "q": "В плохом настроении мне лучше прислать…",
+        "a": ["Разговор", "Мемы срочно", "Еду. Всегда еду."],
+    },
+    {
+        "q": "Мы можем не общаться месяц и не обижаться?",
+        "a": ["Да", "Нет", "Зависит, были ли сторис"],
+    },
+    {
+        "q": "Если мы поссорились — кто первый пришлёт мем?",
+        "a": ["Я", "Она", "Мем пришлёт судьба (бот)"],
+    },
+]
+
+VERDICTS = [
+    ("💍 Подруга по жизни", "С вами можно и в радость, и в ипотеку."),
+    ("☕ Подруга по кофе", "Кофе, разговоры и мемы — идеально."),
+    ("🎉 Подруга по приключениям", "Весело, громко и иногда опасно."),
+    ("🤡 Опасно, но смешно", "Ничего не понятно, но очень смешно."),
+]
+
+FORTUNES = [
+    "🔮 Судьба говорит: «интересный выбор…»",
+    "🧠 Наука подтверждает: совместимость обнаружена.",
+    "🤝 Мемы совпали. Это знак.",
+    "✨ Вселенная одобряет эту дружбу.",
+]
+
+# =====================
+# СОСТОЯНИЯ
+# =====================
+
+@dataclass
+class PlayerState:
+    user_id: int
+    answers: List[int] = field(default_factory=list)
+    q_index: int = 0
+
+
+SOLO: Dict[int, PlayerState] = {}
+
+# =====================
+# ВСПОМОГАТЕЛЬНЫЕ
+# =====================
+
+def question_keyboard(q_index: int) -> InlineKeyboardMarkup:
+    q = QUESTIONS[q_index]
+    buttons = [
+        [InlineKeyboardButton(ans, callback_data=f"{q_index}|{i}")]
+        for i, ans in enumerate(q["a"])
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def pick_verdict(score: int) -> Tuple[str, str]:
+    if score >= 80:
+        return VERDICTS[0]
+    if score >= 60:
+        return VERDICTS[2]
+    if score >= 40:
+        return VERDICTS[1]
+    return VERDICTS[3]
+
+# =====================
+# ХЭНДЛЕРЫ
+# =====================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привет 💖 Я игра «Та самая подруга?»\n\n"
+        "Команды:\n"
+        "/solo — сыграть одной\n"
+    )
+
+async def solo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    SOLO[user_id] = PlayerState(user_id=user_id)
+
+    await update.message.reply_text(
+        QUESTIONS[0]["q"],
+        reply_markup=question_keyboard(0)
+    )
+
+async def on_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    q_index, choice = map(int, query.data.split("|"))
+    user_id = query.from_user.id
+
+    state = SOLO.get(user_id)
+    if not state or q_index != state.q_index:
+        return
+
+    state.answers.append(choice)
+    state.q_index += 1
+
+    if state.q_index >= len(QUESTIONS):
+        score = random.randint(40, 95)
+        title, desc = pick_verdict(score)
+
+        await query.edit_message_text("✅ Ответ записан")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=(
+                f"{random.choice(FORTUNES)}\n\n"
+                f"📊 Совпадение: {score}%\n\n"
+                f"{title}\n{desc}\n\n"
+                f"Хочешь сыграть ещё раз? /solo"
+            )
+        )
+        SOLO.pop(user_id, None)
+    else:
+        next_q = state.q_index
+        await query.edit_message_text("✅ Ответ записан")
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=QUESTIONS[next_q]["q"],
+            reply_markup=question_keyboard(next_q)
+        )
+
+# =====================
+# ЗАПУСК
+# =====================
+
+def main():
+    token = os.getenv("BOT_TOKEN")
+    if not token:raise RuntimeError("BOT_TOKEN not set")
+
+    app = Application.builder().token(token).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("solo", solo))
+    app.add_handler(CallbackQueryHandler(on_answer))
+
+    app.run_polling()
+
+if name == "__main__":
+    main(
