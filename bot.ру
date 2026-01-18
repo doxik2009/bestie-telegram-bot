@@ -82,7 +82,7 @@ QUESTIONS = {
         "Кто выглядит самой спокойной, но у неё хаос в голове?",
         "Кто любит внимание, но не признаётся?",
         "Кто может поддержать, но не будет сюсюкаться?",
-        "Кто любит сплетни, но отрицает?",
+        "Кто из нас любит сплетни, но отрицает?",
         "Кто долго помнит странное знакомство?",
         "Кто может резко сменить мнение?",
         "Кто думает «а что обо мне подумают»?",
@@ -136,6 +136,7 @@ class Game:
     current_player: int = 0
     question_index: int = 0
     waiting_for_players: bool = False
+    ready_to_start: bool = False  # Новый флаг: все нажали "Готово"
 
 GAMES: Dict[int, Game] = {}
 
@@ -150,6 +151,9 @@ def mode_keyboard():
 
 def next_keyboard():
     return InlineKeyboardMarkup([[InlineKeyboardButton("👉 ДАЛЬШЕ", callback_data="next")]])
+
+def ready_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ ГОТОВО", callback_data="ready")]])
 
 # ======================
 # КОМАНДЫ
@@ -211,10 +215,32 @@ async def handle_players(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     game.players = players
+    game.waiting_for_players = False
+    game.ready_to_start = False
+
+    # Показать кнопку "Готово"
+    await context.bot.send_message(
+        chat_id,
+        "Все участницы добавлены. Когда все готовы, нажмите кнопку ✅ ГОТОВО",
+        reply_markup=ready_keyboard()
+    )
+
+# ======================
+# КНОПКА ГОТОВО
+# ======================
+async def ready_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat_id
+    game = GAMES.get(chat_id)
+    if not game or game.ready_to_start:
+        return
+
+    game.ready_to_start = True
     game.current_player = 0
     game.question_index = 0
-    game.waiting_for_players = False
 
+    await context.bot.send_message(chat_id, "🎉 Игра начинается! Весёлого времени 💖")
     await send_question(update, context, game)
 
 # ======================
@@ -246,7 +272,7 @@ async def next_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     chat_id = query.message.chat_id
     game = GAMES.get(chat_id)
-    if not game:
+    if not game or not game.ready_to_start:
         return
     await send_question(update, context, game)
 
@@ -262,8 +288,12 @@ def main():
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newgame", newgame))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_players))
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & (filters.ChatType.PRIVATE | filters.ChatType.GROUP | filters.ChatType.SUPERGROUP),
+        handle_players
+    ))
     app.add_handler(CallbackQueryHandler(callback_handler, pattern="^mode_"))
+    app.add_handler(CallbackQueryHandler(ready_game, pattern="^ready$"))
     app.add_handler(CallbackQueryHandler(next_question, pattern="^next$"))
     app.run_polling()
 
