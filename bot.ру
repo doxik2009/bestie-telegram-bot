@@ -1,10 +1,16 @@
-import os
 import random
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+API_TOKEN = "PASTE_YOUR_TOKEN_HERE"
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+
+games = {}
 
 # =======================
-# ВОПРОСЫ — МОЯ БЕСТИЯ (ВСЕ)
+# ВОПРОСЫ — БЕСТИЯ (ВСЕ)
 # =======================
 
 QUESTIONS_BESTIA = [
@@ -65,7 +71,7 @@ QUESTIONS_BESTIA = [
 ]
 
 # =======================
-# ВОПРОСЫ — МЕЖДУ НАМИ, ДЕВОЧКАМИ (ВСЕ)
+# ВОПРОСЫ — ПОД КОФЕ (ВСЕ)
 # =======================
 
 QUESTIONS_COFFEE = [
@@ -116,105 +122,80 @@ QUESTIONS_COFFEE = [
 {"q": "Кто первым поддерживает беседу?"}
 ]
 
-FUN_COMMENTS = [
-    "😂 Тут точно есть что обсудить",
-    "😏 Интересный поворот",
-    "🤣 Кажется, атмосфера пошла",
-    "😎 Вот это ответы",
-    "🤍 Становится тепло"
+BOT_COMMENTS = [
+    "Записала 👀",
+    "Ого, это уже интересно 😏",
+    "Тут явно есть история…",
+    "Я просто наблюдаю 👂",
+    "Ладно-ладно, продолжаем 😌",
+    "Так, атмосфера пошла 🔥"
 ]
 
-# =======================
-# СОСТОЯНИЕ
-# =======================
-
-GAMES = {}
-
-class GameState:
-    def __init__(self, mode):
-        self.mode = mode
-        self.q_index = 0
-
-# =======================
-# КНОПКИ
-# =======================
-
-def mode_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍷 Моя Бестия", callback_data="mode_bestia")],
-        [InlineKeyboardButton("☕ Между нами, девочками", callback_data="mode_coffee")]
-    ])
-
 def next_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➡️ ДАЛЬШЕ", callback_data="next")]
-    ])
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("ДАЛЬШЕ"))
+    return kb
 
-# =======================
-# ХЭНДЛЕРЫ
-# =======================
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+@dp.message_handler(commands=["newgame"])
+async def new_game(message: types.Message):
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("☕ Под кофе", "🍷 Бестия")
+    await message.answer(
         "☕🍷 ФОРМАТ ИГРЫ\n\n"
-        "Можно играть под кофе или под вино.\n"
-        "Можно писать, отвечать вслух, обсуждать.\n\n"
-        "Это не тест, а повод посмеяться 💛\n\n"
-        "/newgame — начать"
+        "Можно играть:\n"
+        "— под чашку кофе\n"
+        "— под бокал вина\n\n"
+        "Можно:\n"
+        "— писать коротко\n"
+        "— отвечать вслух\n"
+        "— обсуждать ответы\n\n"
+        "Это не тест, а повод посмеяться 💬",
+        reply_markup=kb
     )
 
-async def newgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Выберите режим:", reply_markup=mode_keyboard())
-
-async def choose_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    mode = "bestia" if query.data == "mode_bestia" else "coffee"
-    GAMES[query.message.chat.id] = GameState(mode)
-
-    await query.edit_message_text(
-        "Игра начинается ✨\nНажимайте «ДАЛЬШЕ», когда готовы.",
-        reply_markup=next_keyboard()
+@dp.message_handler(lambda m: m.text in ["☕ Под кофе", "🍷 Бестия"])
+async def choose_mode(message: types.Message):
+    mode = "coffee" if "кофе" in message.text else "bestia"
+    games[message.chat.id] = {
+        "mode": mode,
+        "index": 0,
+        "questions": QUESTIONS_COFFEE if mode == "coffee" else QUESTIONS_BESTIA
+    }
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("ГОТОВО")
+    await message.answer(
+        "Можно ввести имена участниц через запятую\n"
+        "или просто нажать ГОТОВО",
+        reply_markup=kb
     )
 
-async def next_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat.id
-    game = GAMES.get(chat_id)
+@dp.message_handler(lambda m: m.text == "ГОТОВО")
+async def start_questions(message: types.Message):
+    game = games.get(message.chat.id)
+    if not game:
+        return
+    q = game["questions"][0]["q"]
+    await message.answer(f"Вопрос 1:\n\n{q}", reply_markup=next_keyboard())
+
+@dp.message_handler(lambda m: m.text == "ДАЛЬШЕ")
+async def next_question(message: types.Message):
+    game = games.get(message.chat.id)
     if not game:
         return
 
-    questions = QUESTIONS_BESTIA if game.mode == "bestia" else QUESTIONS_COFFEE
-
-    if game.q_index >= len(questions):
-        await query.message.reply_text("✨ Игра окончена. Спасибо 💖")
-        del GAMES[chat_id]
+    game["index"] += 1
+    if game["index"] >= len(game["questions"]):
+        await message.answer("Игра окончена 💕\nСпасибо за атмосферу.")
+        games.pop(message.chat.id)
         return
 
-    q = questions[game.q_index]["q"]
-    await query.message.reply_text(f"❓ {q}", reply_markup=next_keyboard())
-
-    if random.random() < 0.35:
-        await query.message.reply_text(random.choice(FUN_COMMENTS))
-
-    game.q_index += 1
-
-# =======================
-# ЗАПУСК
-# =======================
-
-def main():
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        raise RuntimeError("BOT_TOKEN not set")
-
-    app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("newgame", newgame))
-    app.add_handler(CallbackQueryHandler(choose_mode, pattern="mode_.*"))
-    app.add_handler(CallbackQueryHandler(next_question, pattern="next"))
-    app.run_polling()
+    comment = random.choice(BOT_COMMENTS)
+    q = game["questions"][game["index"]]["q"]
+    await message.answer(comment)
+    await message.answer(
+        f"Вопрос {game['index'] + 1}:\n\n{q}",
+        reply_markup=next_keyboard()
+    )
 
 if __name__ == "__main__":
-    main()
+    executor.start_polling(dp, skip_updates=True)
