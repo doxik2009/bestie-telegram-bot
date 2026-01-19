@@ -10,7 +10,7 @@ dp = Dispatcher(bot)
 games = {}
 
 # =======================
-# ВОПРОСЫ — МОЯ БЕСТИЯ (ВСЕ, БЕЗ ИЗМЕНЕНИЙ)
+# ВОПРОСЫ — МОЯ БЕСТИЯ
 # =======================
 
 QUESTIONS_BESTIA = [
@@ -71,7 +71,7 @@ QUESTIONS_BESTIA = [
 ]
 
 # =======================
-# ВОПРОСЫ — МЕЖДУ НАМИ, ДЕВОЧКАМИ (ВСЕ)
+# ВОПРОСЫ — ПОД КОФЕ
 # =======================
 
 QUESTIONS_COFFEE = [
@@ -122,98 +122,51 @@ QUESTIONS_COFFEE = [
     {"q": "Кто первым поддерживает беседу?"}
 ]
 
-# =======================
-# КОММЕНТАРИИ
-# =======================
+COMMENTS_BESTIA = ["🍷 Вот это ответ…", "😏 Тут чувствуется характер", "🔥 Смело", "😂 Неожиданно"]
+COMMENTS_COFFEE = ["☕ Очень уютно", "🙂 Приятно звучит", "✨ Мягко и по-настоящему"]
 
-COMMENTS_BESTIA = [
-    "🍷 Вот это ответ…",
-    "😏 Тут чувствуется характер",
-    "🔥 Смело",
-    "😂 Это было неожиданно",
-    "👀 Интересно…",
-    "🥂 Атмосфера пошла"
-]
-
-COMMENTS_COFFEE = [
-    "☕ Очень уютно",
-    "🙂 Приятный ответ",
-    "✨ Мягко и по-настоящему",
-    "😊 Такое располагает",
-    "☕ Хорошо сказано",
-    "💬 Разговор пошёл"
-]
-
-FINAL_BESTIA = (
-    "🍷 Игра подошла к концу.\n\n"
-    "Сегодня было всё: смех, намёки и близость.\n"
-    "Если стало теплее — значит, вечер удался ❤️"
-)
-
-FINAL_COFFEE = (
-    "☕ Игра закончилась.\n\n"
-    "Спокойный разговор, живые ответы и ощущение уюта.\n"
-    "Иногда этого достаточно ✨"
-)
-
-# =======================
-# КНОПКИ
-# =======================
+FINAL_BESTIA = "🍷 Вечер получился живым и тёплым. Спасибо за атмосферу ❤️"
+FINAL_COFFEE = "☕ Уютный разговор — лучшее завершение вечера ✨"
 
 def next_kb():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("ДАЛЬШЕ"))
+    kb.add("ДАЛЬШЕ")
     return kb
-
-# =======================
-# ИГРА
-# =======================
 
 @dp.message_handler(commands=["newgame"])
 async def newgame(message: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("☕ Под кофе", "🍷 Моя Бестия")
     await message.answer(
-        "☕🍷 ФОРМАТ ИГРЫ\n\n"
-        "Можно:\n"
-        "— писать коротко\n"
-        "— отвечать вслух\n"
-        "— обсуждать ответы\n\n"
-        "Это не тест и не анкета,\n"
-        "а повод посмеяться и почувствовать атмосферу 💬",
+        "☕🍷 ФОРМАТ ИГРЫ\n\nМожно писать, говорить вслух и обсуждать.\nЭто не тест — это атмосфера 💬",
         reply_markup=kb
     )
 
 @dp.message_handler(lambda m: m.text in ["☕ Под кофе", "🍷 Моя Бестия"])
 async def choose_mode(message: types.Message):
     mode = "coffee" if "кофе" in message.text.lower() else "bestia"
-
     games[message.chat.id] = {
         "mode": mode,
         "questions": QUESTIONS_COFFEE if mode == "coffee" else QUESTIONS_BESTIA,
         "index": 0,
-        "answers": []
+        "answers": [],
+        "waiting": False
     }
-
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("ГОТОВО")
-
-    await message.answer(
-        "Можно ввести имена участниц через запятую\n"
-        "или просто нажать ГОТОВО",
-        reply_markup=kb
-    )
+    await message.answer("Введите имена через запятую или нажмите ГОТОВО", reply_markup=kb)
 
 @dp.message_handler(lambda m: m.text == "ГОТОВО")
 async def start_game(message: types.Message):
     game = games[message.chat.id]
+    game["waiting"] = True
     q = game["questions"][0]["q"]
     await message.answer(f"Вопрос 1:\n\n{q}", reply_markup=next_kb())
 
-@dp.message_handler(lambda m: m.text != "ДАЛЬШЕ")
+@dp.message_handler(lambda m: m.text not in ["ДАЛЬШЕ", "ГОТОВО"])
 async def collect_answers(message: types.Message):
     game = games.get(message.chat.id)
-    if game:
+    if game and game["waiting"]:
         game["answers"].append(message.text)
 
 @dp.message_handler(lambda m: m.text == "ДАЛЬШЕ")
@@ -224,28 +177,19 @@ async def next_question(message: types.Message):
         return
 
     chosen = random.choice(game["answers"])
-    comment = random.choice(
-        COMMENTS_COFFEE if game["mode"] == "coffee" else COMMENTS_BESTIA
-    )
-
+    comment = random.choice(COMMENTS_COFFEE if game["mode"] == "coffee" else COMMENTS_BESTIA)
     await message.answer(f"💬 {chosen}\n\n{comment}")
 
     game["answers"].clear()
     game["index"] += 1
 
     if game["index"] >= len(game["questions"]):
-        await message.answer(
-            FINAL_COFFEE if game["mode"] == "coffee" else FINAL_BESTIA
-        )
+        await message.answer(FINAL_COFFEE if game["mode"] == "coffee" else FINAL_BESTIA)
         games.pop(message.chat.id)
         return
 
     q = game["questions"][game["index"]]["q"]
-    await message.answer(
-        f"Вопрос {game['index'] + 1}:\n\n{q}",
-        reply_markup=next_kb()
-    )
+    await message.answer(f"Вопрос {game['index'] + 1}:\n\n{q}", reply_markup=next_kb())
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
-
