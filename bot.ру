@@ -1,3 +1,4 @@
+import os
 import logging
 import random
 
@@ -5,7 +6,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
 
-API_TOKEN = "ВСТАВЬ_СЮДА_ТОКЕН"
+API_TOKEN = os.getenv("BOT_TOKEN") 
 
 logging.basicConfig(level=logging.INFO)
 
@@ -14,7 +15,7 @@ dp = Dispatcher(bot)
 
 # =======================
 # СОСТОЯНИЕ ИГРЫ
-# =======================
+# fix=======================
 games = {}  # chat_id -> dict
 
 
