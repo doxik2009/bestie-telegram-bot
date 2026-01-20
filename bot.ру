@@ -1,27 +1,33 @@
 import os
 import logging
 import random
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-API_TOKEN = os.getenv("BOT_TOKEN") 
+# =======================
+# НАСТРОЙКИ
+# =======================
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(token=API_TOKEN)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN is missing")
+
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-# =======================
-# СОСТОЯНИЕ ИГРЫ
-# fix=======================
-games = {}  # chat_id -> dict
-
+MODE_WINE = "wine"
+MODE_COFFEE = "coffee"
 
 # =======================
-# ВОПРОСЫ — 🍷 ВИНО (ТВОЙ СПИСОК, НЕ МЕНЯЮ)
+# ВОПРОСЫ — ВИНО (ТВОИ, НЕ МЕНЯЮ)
 # =======================
+
 QUESTIONS_WINE = [
     {"q": "Ты пишешь «ок» — это…"},
     {"q": "Если я опаздываю на 20 минут, ты…"},
@@ -79,10 +85,10 @@ QUESTIONS_WINE = [
     {"q": "Кто чаще смеётся над собой?"}
 ]
 
+# =======================
+# ВОПРОСЫ — КОФЕ (ТВОИ, НЕ МЕНЯЮ)
+# =======================
 
-# =======================
-# ВОПРОСЫ — ☕ КОФЕ (НОВЫЕ 40, НЕ ДУБЛЯТСЯ С ВИННЫМИ)
-# =======================
 QUESTIONS_COFFEE = [
     {"q": "Какое у тебя было самое любимое занятие в детстве?"},
     {"q": "Какой мультфильм ты могла пересматривать бесконечно?"},
@@ -125,10 +131,10 @@ QUESTIONS_COFFEE = [
     {"q": "Какой ты была, когда чувствовала себя самой собой?"}
 ]
 
+# =======================
+# КОММЕНТАРИИ (ТВОИ, НЕ МЕНЯЮ)
+# =======================
 
-# =======================
-# КОММЕНТАРИИ (НЕ МЕНЯЮ)
-# =======================
 COMMENTS_COFFEE = [
     "☕ Под кофе это звучит особенно честно",
     "☕ Тут явно было без фильтров",
@@ -141,279 +147,329 @@ COMMENTS_WINE = [
     "🍷 Ой, тут пошла правда"
 ]
 
+FUNNY_REPLIES = [
+    "Ха-ха, это звучит как «я в порядке»… но мы-то знаем правду 😄",
+    "Записываю в золотой фонд женской мудрости ✍️😌",
+    "Ой, ну всё, теперь я фанат этой версии тебя 😂",
+    "Это было неожиданно… и прекрасно 😅",
+    "Так, где кнопка «повторить ещё раз», я не успела насладиться 😄",
+    "Официально: это ответ дня 🏆",
+    "Мне кажется, после этого ответа вы должны выдать себе медаль 😌",
+    "Ну всё, теперь это наша общая внутренняя шутка 🤝😂"
+]
 
-# =======================
-# ФИНАЛЬНЫЕ СЛОВА
-# =======================
-FINAL_TEXT_COFFEE = (
-    "☕ Спасибо за этот тёплый разговор.\n\n"
-    "Иногда так важно просто остановиться,\n"
-    "вспомнить себя, посмеяться и услышать друг друга.\n\n"
-    "Пусть это чувство уюта и близости\n"
-    "останется с вами чуть дольше, чем этот вечер 💛"
+FINAL_WINE = "🍷 Финал! Спасибо за вечер 🥂"
+FINAL_COFFEE = "☕ Финал! Спасибо за уют 💛"
+
+INSTRUCTION_TEXT = (
+    "☕🍷 ИГРА ДЛЯ РАЗГОВОРОВ И СМЕХА\n\n"
+    "Это не тест и не анкета.\n"
+    "Это повод поговорить, посмеяться и почувствовать атмосферу.\n\n"
+    "Как играем:\n"
+    "— бот задаёт вопрос\n"
+    "— все отвечают в чате (коротко или как хочется)\n"
+    "— можно обсуждать и дополнять друг друга\n"
+    "— когда все готовы — ведущий нажимает «ДАЛЬШЕ»\n\n"
+    "Важно:\n"
+    "— нет правильных и неправильных ответов\n"
+    "— иногда бот будет смешно комментировать ответы\n"
+    "— самые смешные моменты можно сохранить\n\n"
+    "Игра подходит для офлайн и онлайн.\n"
+    "Если стало тепло, смешно или очень честно — значит, всё идёт как надо 💛"
 )
 
-FINAL_TEXT_WINE = (
-    "🍷 Ну что… вот и вся правда на сегодня 😌\n\n"
-    "Смех, честность, взгляды и фразы,\n"
-    "которые останутся между своими.\n\n"
-    "Пусть этот вечер запомнится\n"
-    "как тот самый — тёплый, дерзкий и настоящий ✨"
-)
-
-
 # =======================
-# КНОПКИ
+# СОСТОЯНИЕ ИГРЫ
 # =======================
-kb_mode = ReplyKeyboardMarkup(resize_keyboard=True)
-kb_mode.add(KeyboardButton("☕ КОФЕ"), KeyboardButton("🍷 ВИНО"))
 
-kb_ready = ReplyKeyboardMarkup(resize_keyboard=True)
-kb_ready.add(KeyboardButton("ГОТОВО"))
-
-kb_next = ReplyKeyboardMarkup(resize_keyboard=True)
-kb_next.add(KeyboardButton("ДАЛЬШЕ"))
-
-kb_save = ReplyKeyboardMarkup(resize_keyboard=True)
-kb_save.add(KeyboardButton("СОХРАНИТЬ 💾"), KeyboardButton("НАЧАТЬ СНОВА"))
+@dataclass
+class GameState:
+    leader_id: int
+    mode: Optional[str] = None
+    index: int = 0
+    answers: List[Tuple[int, str, str]] = field(default_factory=list)  # (user_id, name, text)
+    saved_top: List[str] = field(default_factory=list)  # top-3 saved featured answers
+    last_featured: Optional[str] = None  # last featured answer
 
 
-# =======================
-# УТИЛИТЫ
-# =======================
+games: Dict[int, GameState] = {}  # chat_id -> state
+
+
 def get_questions(mode: str):
-    return QUESTIONS_WINE if mode == "wine" else QUESTIONS_COFFEE
+    return QUESTIONS_WINE if mode == MODE_WINE else QUESTIONS_COFFEE
 
-def get_comments(mode: str):
-    return COMMENTS_WINE if mode == "wine" else COMMENTS_COFFEE
 
-def get_final_text(mode: str):
-    return FINAL_TEXT_WINE if mode == "wine" else FINAL_TEXT_COFFEE
+def pick_mode_comment(mode: str) -> str:
+    return random.choice(COMMENTS_WINE if mode == MODE_WINE else COMMENTS_COFFEE)
 
-def fun_score(text: str) -> int:
-    t = (text or "").strip().lower()
-    if not t:
-        return -999
 
-    score = 0
+def kb_choose_mode() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🍷 ВИНО", callback_data="mode:wine"),
+        InlineKeyboardButton("☕ КОФЕ", callback_data="mode:coffee"),
+    )
+    return kb
 
-    laugh_emojis = ["😂", "🤣", "😹", "💀", "😭"]
-    score += sum(3 for e in laugh_emojis if e in text)
 
-    laugh_words = [
-        "ахаха", "ахах", "хаха", "хех", "лол", "ору", "ржу",
-        "угар", "кринж", "жесть", "капец", "боже", "пипец"
-    ]
-    score += sum(2 for w in laugh_words if w in t)
+def kb_ready() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("ГОТОВО ✅", callback_data="ready"))
+    return kb
 
-    score += min(t.count(")"), 6)
-    score += min(t.count("!"), 5)
-    score += min(t.count("?"), 3)
 
-    words = [w for w in t.split() if w]
-    if len(words) >= 6:
-        score += 3
-    elif len(words) >= 4:
-        score += 2
-    elif len(words) >= 2:
-        score += 1
-    else:
-        score -= 2
+def kb_controls() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("ДАЛЬШЕ ➜", callback_data="next"),
+        InlineKeyboardButton("Показать сохранённое 😂", callback_data="show_saved"),
+    )
+    return kb
 
-    if len(t) <= 3:
-        score -= 4
 
-    return score
+def kb_save_featured() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("СОХРАНИТЬ 😂", callback_data="save_featured"))
+    return kb
+
+
+def kb_finish() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton("Завершить ✅", callback_data="finish"))
+    return kb
 
 
 # =======================
-# /start
+# START
 # =======================
+
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
-    games[message.chat.id] = {
-        "mode": None,      # "coffee" / "wine"
-        "index": 0,
-        "answers": [],
-        "log": [],         # ответы за весь вечер
-        "started": False
-    }
+    chat_id = message.chat.id
+
+    # Ведущий = первый, кто нажал /start в этом чате
+    if chat_id not in games:
+        games[chat_id] = GameState(leader_id=message.from_user.id)
 
     await message.answer(
-        "☕🍷 ФОРМАТ ИГРЫ\n\n"
-        "Можно играть:\n"
-        "— под чашку кофе\n"
-        "— под бокал вина\n\n"
-        "Можно:\n"
-        "— писать коротко\n"
-        "— отвечать вслух\n"
-        "— обсуждать ответы между собой\n\n"
-        "Это не тест и не анкета,\n"
-        "а повод посмеяться, поговорить и почувствовать атмосферу.\n\n"
-        "Выбери режим кнопкой ниже:",
-        reply_markup=kb_mode
+        "Выбери режим:",
+        reply_markup=kb_choose_mode()
     )
 
 
-# =======================
-# ВЫБОР РЕЖИМА
-# =======================
-@dp.message_handler(lambda m: m.text in ["☕ КОФЕ", "🍷 ВИНО"])
-async def choose_mode(message: types.Message):
-    game = games.get(message.chat.id)
-    if not game:
-        await start(message)
-        game = games.get(message.chat.id)
+@dp.callback_query_handler(lambda c: c.data.startswith("mode:"))
+async def choose_mode(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    mode = callback.data.split(":", 1)[1]
 
-    game["mode"] = "wine" if message.text == "🍷 ВИНО" else "coffee"
+    # если игры ещё нет — создаём, ведущий = тот, кто начал тут сейчас
+    if chat_id not in games:
+        games[chat_id] = GameState(leader_id=callback.from_user.id)
 
-    await message.answer(
-        "Отлично! Нажми ГОТОВО, чтобы начать 😄",
-        reply_markup=kb_ready
+    game = games[chat_id]
+    game.mode = mode
+    game.index = 0
+    game.answers = []
+    game.saved_top = []
+    game.last_featured = None
+
+    await callback.answer()
+    await bot.send_message(
+        chat_id,
+        INSTRUCTION_TEXT,
+        reply_markup=kb_ready()
     )
 
 
-# =======================
-# НАЧАЛО ИГРЫ
-# =======================
-@dp.message_handler(lambda m: m.text == "ГОТОВО")
-async def begin(message: types.Message):
-    game = games.get(message.chat.id)
-    if not game:
-        await start(message)
+@dp.callback_query_handler(lambda c: c.data == "ready")
+async def ready(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    game = games.get(chat_id)
+
+    if not game or not game.mode:
+        await callback.answer("Сначала выбери режим 🙂", show_alert=False)
         return
 
-    if not game.get("mode"):
-        await message.answer("Сначала выбери режим: ☕ КОФЕ или 🍷 ВИНО", reply_markup=kb_mode)
+    # Только ведущий запускает игру
+    if callback.from_user.id != game.leader_id:
+        await callback.answer("Только ведущий может нажать «ГОТОВО» 😊", show_alert=False)
         return
 
-    game["started"] = True
-    await send_question(message.chat.id)
+    await callback.answer()
+    await send_question(chat_id)
 
+
+# =======================
+# ОТПРАВКА ВОПРОСА
+# =======================
 
 async def send_question(chat_id: int):
     game = games.get(chat_id)
-    if not game:
+    if not game or not game.mode:
         return
 
-    questions = get_questions(game["mode"])
+    questions = get_questions(game.mode)
 
-    if game["index"] >= len(questions):
-        await bot.send_message(chat_id, get_final_text(game["mode"]), reply_markup=kb_save)
-        # НЕ удаляем games — чтобы работали кнопки СОХРАНИТЬ / НАЧАТЬ СНОВА
+    if game.index >= len(questions):
+        final = FINAL_WINE if game.mode == MODE_WINE else FINAL_COFFEE
+        await bot.send_message(chat_id, final, reply_markup=kb_finish())
         return
 
-    game["answers"] = []
+    game.answers = []
+    game.last_featured = None
 
+    q = questions[game.index]["q"]
     await bot.send_message(
         chat_id,
-        f"❓ {questions[game['index']]['q']}\n\n"
+        f"❓ {q}\n\n"
         "Ответьте в чате.\n"
-        "Когда все готовы — нажмите «ДАЛЬШЕ»",
-        reply_markup=kb_next
+        "Когда все готовы — ведущий нажимает «ДАЛЬШЕ»",
+        reply_markup=kb_controls()
     )
 
 
 # =======================
-# СОХРАНИТЬ 💾 (ТОП-3 САМЫХ СМЕШНЫХ)
+# СБОР ОТВЕТОВ
 # =======================
-@dp.message_handler(lambda m: m.text == "СОХРАНИТЬ 💾")
-async def save_evening(message: types.Message):
-    chat_id = message.chat.id
-    game = games.get(chat_id)
-    if not game:
-        return
 
-    mode_title = "☕ КОФЕ" if game.get("mode") == "coffee" else "🍷 ВИНО"
-    total_q = game.get("index", 0)
-    all_answers = game.get("log", [])
-
-    cleaned = [a.strip() for a in all_answers if a and a.strip() and a.strip() != "ДАЛЬШЕ"]
-
-    if cleaned:
-        ranked = sorted(cleaned, key=fun_score, reverse=True)
-
-        picks = []
-        seen = set()
-        for a in ranked:
-            k = a.lower()
-            if k in seen:
-                continue
-            seen.add(k)
-            picks.append(a)
-            if len(picks) == 3:
-                break
-
-        picks_text = "\n".join([f"— {p}" for p in picks])
-
-        memory = (
-            f"💾 ПАМЯТКА ВЕЧЕРА\n\n"
-            f"Режим: {mode_title}\n"
-            f"Вопросов прошли: {total_q}\n\n"
-            f"Топ-3 шедевра вечера 😄:\n"
-            f"{picks_text}\n\n"
-            "Сохраните это сообщение в Избранное ✨"
-        )
-    else:
-        memory = (
-            f"💾 ПАМЯТКА ВЕЧЕРА\n\n"
-            f"Режим: {mode_title}\n"
-            f"Вопросов прошли: {total_q}\n\n"
-            "Сегодня вы были загадочными 😄\n"
-            "Сохраните это сообщение в Избранное ✨"
-        )
-
-    await message.answer(memory, reply_markup=kb_save)
-    game["started"] = False
-
-
-# =======================
-# НАЧАТЬ СНОВА
-# =======================
-@dp.message_handler(lambda m: m.text == "НАЧАТЬ СНОВА")
-async def restart(message: types.Message):
-    await start(message)
-
-
-# =======================
-# СБОР ОТВЕТОВ + ДАЛЬШЕ
-# =======================
 @dp.message_handler(content_types=types.ContentTypes.TEXT)
-async def collect(message: types.Message):
+async def collect_answers(message: types.Message):
     chat_id = message.chat.id
     game = games.get(chat_id)
-    if not game or not game.get("started"):
+    if not game or not game.mode:
         return
 
-    text = message.text.strip()
-
-    if text == "ДАЛЬШЕ":
-        if not game["answers"]:
-            await message.answer("Ну хоть точку кто-нибудь поставьте 😄")
-            return
-
-        # сохраняем ответы этого вопроса в общий лог
-        game["log"].extend(game["answers"])
-
-        chosen = random.choice(game["answers"])
-
-        # Выборочные комментарии (35%)
-        if random.random() < 0.35:
-            comment = random.choice(get_comments(game["mode"]))
-            await message.answer(f"💬 {chosen}\n\n{comment}")
-        else:
-            await message.answer(f"💬 {chosen}")
-
-        game["index"] += 1
-        await send_question(chat_id)
+    txt = (message.text or "").strip()
+    if not txt or txt.startswith("/"):
         return
 
-    # обычный ответ участницы
-    game["answers"].append(text)
+    uid = message.from_user.id if message.from_user else 0
+    name = message.from_user.full_name if message.from_user else "Кто-то"
+    game.answers.append((uid, name, txt))
+
+    # Выборочно и нечасто: смешной комментарий на ответ
+    if random.random() < 0.22:
+        await message.reply(random.choice(FUNNY_REPLIES))
+
+
+# =======================
+# КНОПКА ДАЛЬШЕ
+# =======================
+
+@dp.callback_query_handler(lambda c: c.data == "next")
+async def next_step(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    game = games.get(chat_id)
+
+    if not game or not game.mode:
+        await callback.answer("Игра не найдена")
+        return
+
+    # Только ведущий переключает вопросы
+    if callback.from_user.id != game.leader_id:
+        await callback.answer("Только ведущий может нажимать «ДАЛЬШЕ» 😊", show_alert=False)
+        return
+
+    if not game.answers:
+        await callback.answer("Пусть кто-нибудь ответит 😄", show_alert=False)
+        return
+
+    uid, name, text = random.choice(game.answers)
+    featured = f"{name}: {text}"
+    game.last_featured = featured
+
+    await callback.answer()
+
+    # показываем выбранный ответ + режимный комментарий
+    await bot.send_message(
+        chat_id,
+        f"💬 {featured}\n\n{pick_mode_comment(game.mode)}",
+        reply_markup=kb_save_featured()
+    )
+
+    game.index += 1
+    await send_question(chat_id)
+
+
+# =======================
+# СОХРАНИТЬ ТОП-3
+# =======================
+
+@dp.callback_query_handler(lambda c: c.data == "save_featured")
+async def save_featured(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    game = games.get(chat_id)
+
+    if not game:
+        await callback.answer("Игра не найдена")
+        return
+
+    # сохранять может только ведущий (чтобы не было хаоса)
+    if callback.from_user.id != game.leader_id:
+        await callback.answer("Сохраняет только ведущий 😊", show_alert=False)
+        return
+
+    if not game.last_featured:
+        await callback.answer("Нечего сохранять 😄")
+        return
+
+    if game.last_featured in game.saved_top:
+        await callback.answer("Уже сохранено 😂")
+        return
+
+    if len(game.saved_top) >= 3:
+        await callback.answer("Топ-3 уже заполнен 😂", show_alert=False)
+        return
+
+    game.saved_top.append(game.last_featured)
+    await callback.answer("Сохранено 😂")
+
+
+@dp.callback_query_handler(lambda c: c.data == "show_saved")
+async def show_saved(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    game = games.get(chat_id)
+
+    if not game:
+        await callback.answer("Игра не найдена")
+        return
+
+    await callback.answer()
+
+    if not game.saved_top:
+        await bot.send_message(chat_id, "Пока ничего не сохранено 😄")
+        return
+
+    text = "😂 Топ сохранённого:\n\n" + "\n".join(
+        [f"{i+1}) {item}" for i, item in enumerate(game.saved_top)]
+    )
+    await bot.send_message(chat_id, text)
+
+
+# =======================
+# ЗАВЕРШИТЬ
+# =======================
+
+@dp.callback_query_handler(lambda c: c.data == "finish")
+async def finish(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    game = games.get(chat_id)
+
+    await callback.answer()
+
+    if game and game.saved_top:
+        text = "😂 Перед тем как разойтись — ваш топ:\n\n" + "\n".join(
+            [f"{i+1}) {item}" for i, item in enumerate(game.saved_top)]
+        )
+        await bot.send_message(chat_id, text)
+
+    games.pop(chat_id, None)
+    await bot.send_message(chat_id, "Игра завершена ✅\n/start — начать заново")
 
 
 # =======================
 # ЗАПУСК
 # =======================
+
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
